@@ -127,6 +127,7 @@ function returnFromSettings(){
  else if(settingsReturnState==='lobby'&&netRole==='host')showHostLobby();
  else if(settingsReturnState==='menu')menu();
  else{state=settingsReturnState;show('');}
+ updateMobileActionVisibility();
 }
  // Online multiplayer: one host simulates the match; the guest sends inputs and receives snapshots.
 let peer=null,conn=null,netRole='none',roomCode='',netConnected=false,netInputTimer=0,netSnapshotAt=0,netGameStarted=false,netLastOverlay='',netOpenTimeout=null,lastGuestMoveAt=0;
@@ -146,11 +147,16 @@ function los(a,b){
  return 1;
 }
 function fire(i){
- if(mode===3||state!=='play'||i!==hunter)return;
+ if(state!=='play'||i!==hunter)return;
  if(netRole==='guest'&&i!==1)return;
  const p=pl[i],o=pl[1-i];
  if(p.fc>0)return;
  p.fc=.4;p.shot=.25;
+ if(mode===3){
+  bang();
+  sfx(1600,.06);
+  return;
+ }
  const dx=o.x-p.x,dy=o.y-p.y;
  if(dx*dx+dy*dy>4)return bang();
  if(!los(p,o)){bang();return sfx(1600,.06)}
@@ -221,13 +227,15 @@ function gen(){
   const cand=open.filter(e=>t>=250||(dd(e)>=mx*.4&&dd(e)<=mx*.6));
   if(!cand.length)continue;
   exit=cand[R(cand.length)];
+  if(mode===3){buildStaticCache();return;}
   if(!bfs(hp,pp))continue;
   const p1=bfs(pp,exit);
   if(!p1)continue;
   if(t<120&&p1.length-1<1.3*(Math.abs(exit.x-pp.x)+Math.abs(exit.y-pp.y)))continue;
   const blk=new Set(p1.slice(1,-1).map(q=>q.y*N+q.x));
-  if(bfs(pp,exit,blk)){buildStaticCache();return}
+  if(bfs(pp,exit,blk)||t>200){buildStaticCache();return}
  }
+ buildStaticCache();
 }
 function board(){
  if(mode===3)hunter=freeRoamRole==='hunter'?0:1;
@@ -243,7 +251,7 @@ function updateMobileActionVisibility(){
  if(!button||!controls)return;
  const player=currentPlayerIndex(),activeTouchGame=state==='play'&&isTouchDevice;
  controls.style.display=activeTouchGame?'flex':'none';
- const canFire=activeTouchGame&&mode!==3&&player===hunter;
+ const canFire=activeTouchGame&&player===hunter;
  button.style.display=canFire?'':'none';
  button.setAttribute('aria-hidden',canFire?'false':'true');
  button.disabled=!canFire;
@@ -263,6 +271,7 @@ function start(ai){
 function freeRoamMenu(){
  state='menu';mode=3;
  show(`<h2>Free roam</h2><p>Explore the maze alone. Choose which role you want to play. There is no opponent, timer, or score.</p><div class="row"><button onclick="startFreeRoam('hunter')">Play as Hunter</button><button onclick="startFreeRoam('prey')">Play as Prey</button></div><div class="row"><button onclick="settingsMenu()">Settings</button><button onclick="menu()">Back to main menu</button></div>`);
+ updateMobileActionVisibility();
 }
 function startFreeRoam(role){
  closeOnlineRoom(false);netRole='none';netConnected=false;netGameStarted=false;mode=3;freeRoamRole=role;
@@ -287,6 +296,7 @@ function over(){
  show('<h2>Play with friends</h2><p>Create a room and share its code, or enter a friend\'s code to join.</p><div class="row"><button onclick="createOnlineRoom()">Create room</button></div><input id="roomCodeInput" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="6-CHAR CODE" aria-label="Room code"><div class="row"><button onclick="joinOnlineRoom()">Join room</button><button onclick="menu()">Back</button></div><p id="netStatus" class="status" role="status">Both players need an internet connection.</p>');
  const field=document.getElementById('roomCodeInput');
  if(field){const q=new URLSearchParams(location.search).get('room');if(q)field.value=q.toUpperCase();field.addEventListener('keydown',e=>{if(e.key==='Enter')joinOnlineRoom()})}
+ updateMobileActionVisibility();
 }
 function netStatus(text){const el=document.getElementById('netStatus');if(el)el.textContent=text}
 function newRoomCode(){const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let out='';for(let i=0;i<6;i++)out+=alphabet[R(alphabet.length)];return out}
@@ -454,7 +464,7 @@ function update(dt){
  function human(p,i){
  const x0=p.px*T+T/2,y0=p.py*T+H+T/2,h=i===hunter,o=pl[1-i];
  const mvg=Math.abs(p.x-p.px)+Math.abs(p.y-p.py)>.05,w=mvg?Math.round(Math.sin(p.ph)*3):0;
- const ax=o.x-p.x,ay=o.y-p.y,adx=Math.abs(ax)>=Math.abs(ay)?Math.sign(ax):0,ady=adx?0:Math.sign(ay);
+ const ax=mode===3?0:o.x-p.x,ay=mode===3?1:o.y-p.y,adx=Math.abs(ax)>=Math.abs(ay)?Math.sign(ax):0,ady=adx?0:Math.sign(ay);
  const rc=p.shot>0?Math.min(1,p.shot/.25):0;
  const x=x0-adx*rc*3,y=y0+(mvg?-Math.abs(Math.sin(p.ph))*2:Math.sin(performance.now()/380+i*2)*.7)-ady*rc*2;
  const fx=h?adx:p.fx,fy=h?ady:p.fy;
@@ -487,8 +497,8 @@ function update(dt){
   }
  }
  g.fillStyle='#fff';g.strokeStyle='#000';g.lineWidth=3;g.font='bold 10px sans-serif';g.textAlign='center';
- const l=i?'P2':'P1';g.strokeText(l,x,y-20);g.fillText(l,x,y-20);
- if(p.idle>.7){g.fillStyle='#e04a38';g.fillRect(x-12,y-27,24*Math.min(1,p.idle/2),3)}
+ const l=mode===3?(freeRoamRole==='hunter'?'Hunter':'Prey'):(i?'P2':'P1');g.strokeText(l,x,y-20);g.fillText(l,x,y-20);
+ if(p.idle>.7&&mode!==3){g.fillStyle='#e04a38';g.fillRect(x-12,y-27,24*Math.min(1,p.idle/2),3)}
 }
 // Textured stone wall tiles are cached and reused.
 function mkTex(seed,moss,crack){
@@ -566,14 +576,14 @@ function draw(){
  g.clearRect(0,0,576,590);
  g.save();g.translate(T+(sh>0?(Math.random()-.5)*8*sh:0),T+(sh>0?(Math.random()-.5)*8*sh:0));
  g.drawImage(staticFloorCache,0,0);
- portal(exit.x*T,exit.y*T+H);
+ if(mode!==3)portal(exit.x*T,exit.y*T+H);
  for(let y=-1;y<=N;y++){
   g.drawImage(staticWallRows[y+1],0,y*T);
   for(let i=0;i<2;i++)if((mode!==3||i===0)&&Math.round(pl[i].py)===y)human(pl[i],i);
  }
  for(const q of PT){g.fillStyle='rgba('+(q.c||'215,210,195')+','+Math.min(1,q.l*1.4)+')';g.fillRect(q.x,q.y,q.c?2:3,3)}
  g.restore();
- if(flash>0){
+ if(flash>0&&mode!==3){
   const a=Math.min(1,flash/.4);g.fillStyle='rgba(255,255,255,'+a+')';g.fillRect(0,0,576,590);
   g.fillStyle='rgba(20,30,20,'+a+')';g.font='bold 44px sans-serif';g.textAlign='center';g.fillText('SHIFT!',288,285);
   g.font='bold 15px sans-serif';g.fillText(nm(hunter)+' is the Hunter now. Keep moving!',288,315);
@@ -726,11 +736,11 @@ document.querySelectorAll('#dpad button[data-dir]').forEach(button=>{
  });
 });
 
-// FIRE/TAG is only usable by the Hunter; it is hidden for the Prey and in Free Roam.
+// FIRE/TAG is usable by the Hunter (and in Free Roam if playing as Hunter).
 document.getElementById('mobileFire').addEventListener('pointerdown',e=>{
  e.preventDefault();
  const player=currentPlayerIndex();
- if(state!=='play'||mode===3||player!==hunter)return;
+ if(state!=='play'||player!==hunter)return;
  if(netRole==='guest'){
   if(netConnected)sendNet({type:'fire'});
  }else fire(player);
