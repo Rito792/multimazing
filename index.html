@@ -207,35 +207,141 @@ function divide(x,y,w,h,m){
  }
 }
 // Generate a maze and validate routes before accepting it.
-function gen(){
- for(let t=0;t<300;t++){
-  grid=Array.from({length:N},()=>Array(N).fill(0));
-  divide(0,0,N,N,t<150?3:t<250?5:99);
-  for(let k=0;k<8;k++){
-   const x=1+R(N-2),y=1+R(N-2);
-   if(grid[y][x]&&((!grid[y][x-1]&&!grid[y][x+1])||(!grid[y-1][x]&&!grid[y+1][x])))grid[y][x]=0;
+function gen() {
+  let generated = false;
+
+  for (let t = 0; t < 300; t++) {
+    grid = Array.from({ length: N }, () => Array(N).fill(0));
+
+    divide(0, 0, N, N, 3);
+
+    // Add a few shortcuts without opening large areas.
+    for (let k = 0; k < 8; k++) {
+      const x = 1 + R(N - 2);
+      const y = 1 + R(N - 2);
+
+      if (
+        grid[y][x] &&
+        (
+          (!grid[y][x - 1] && !grid[y][x + 1]) ||
+          (!grid[y - 1][x] && !grid[y + 1][x])
+        )
+      ) {
+        grid[y][x] = 0;
+      }
+    }
+
+    // Keep both players' starting areas accessible.
+    for (const p of pl) {
+      grid[p.y][p.x] = 0;
+
+      for (const [dx, dy] of D) {
+        if (ok(p.x + dx, p.y + dy)) {
+          grid[p.y + dy][p.x + dx] = 0;
+        }
+      }
+    }
+
+    const hp = pl[hunter];
+    const pp = pl[1 - hunter];
+    const dist = flood(pp);
+    const perimeter = [];
+
+    for (let i = 0; i < N; i++) {
+      perimeter.push(
+        { x: i, y: 0 },
+        { x: i, y: N - 1 },
+        { x: 0, y: i },
+        { x: N - 1, y: i }
+      );
+    }
+
+    const distance = p => dist[p.y * N + p.x];
+
+    const open = perimeter.filter(p =>
+      !grid[p.y][p.x] &&
+      distance(p) > 0 &&
+      !pl.some(player => player.x === p.x && player.y === p.y)
+    );
+
+    const maxDistance = Math.max(0, ...open.map(distance));
+
+    const candidates = open.filter(p =>
+      distance(p) >= maxDistance * 0.4 &&
+      distance(p) <= maxDistance * 0.6
+    );
+
+    if (!candidates.length) continue;
+
+    const candidateExit = candidates[R(candidates.length)];
+
+    if (!bfs(hp, pp)) continue;
+
+    const path = bfs(pp, candidateExit);
+    if (!path) continue;
+
+    const directDistance =
+      Math.abs(candidateExit.x - pp.x) +
+      Math.abs(candidateExit.y - pp.y);
+
+    if (t < 120 && path.length - 1 < 1.3 * directDistance) {
+      continue;
+    }
+
+    // Require a second route to the exit.
+    const blockedPath = new Set(
+      path.slice(1, -1).map(p => p.y * N + p.x)
+    );
+
+    if (!bfs(pp, candidateExit, blockedPath)) continue;
+
+    exit = candidateExit;
+    generated = true;
+    break;
   }
-  for(const p of pl){
-   grid[p.y][p.x]=0;
-   for(const[a,b]of D)if(ok(p.x+a,p.y+b))grid[p.y+b][p.x+a]=0;
+
+  // Safe fallback: create a fresh maze instead of retaining
+  // an invalid map from the last failed generation attempt.
+  if (!generated) {
+    grid = Array.from({ length: N }, () => Array(N).fill(0));
+    divide(0, 0, N, N, 3);
+
+    for (const p of pl) {
+      grid[p.y][p.x] = 0;
+    }
+
+    const pp = pl[1 - hunter];
+    const reachable = [];
+
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        if (x === 0 || y === 0 || x === N - 1 || y === N - 1) {
+          if (!grid[y][x]) {
+            reachable.push({ x, y });
+          }
+        }
+      }
+    }
+
+    const dist = flood(pp);
+    const validExits = reachable.filter(p =>
+      dist[p.y * N + p.x] > 0 &&
+      !pl.some(player => player.x === p.x && player.y === p.y)
+    );
+
+    if (validExits.length) {
+      validExits.sort((a, b) =>
+        dist[b.y * N + b.x] - dist[a.y * N + a.x]
+      );
+      exit = validExits[0];
+    } else {
+      // Ensure a usable exit even if the generated maze is unusual.
+      exit = { x: N - 1, y: N - 1 };
+      grid[exit.y][exit.x] = 0;
+    }
   }
-  const hp=pl[hunter],pp=pl[1-hunter],dist=flood(pp),per=[];
-  for(let i=0;i<N;i++)per.push({x:i,y:0},{x:i,y:N-1},{x:0,y:i},{x:N-1,y:i});
-  const dd=e=>dist[e.y*N+e.x];
-  const open=per.filter(e=>!grid[e.y][e.x]&&dd(e)>0&&!pl.some(p=>p.x==e.x&&p.y==e.y));
-  const mx=Math.max(0,...open.map(dd));
-  const cand=open.filter(e=>t>=250||(dd(e)>=mx*.4&&dd(e)<=mx*.6));
-  if(!cand.length)continue;
-  exit=cand[R(cand.length)];
-  if(mode===3){buildStaticCache();return;}
-  if(!bfs(hp,pp))continue;
-  const p1=bfs(pp,exit);
-  if(!p1)continue;
-  if(t<120&&p1.length-1<1.3*(Math.abs(exit.x-pp.x)+Math.abs(exit.y-pp.y)))continue;
-  const blk=new Set(p1.slice(1,-1).map(q=>q.y*N+q.x));
-  if(bfs(pp,exit,blk)||t>200){buildStaticCache();return}
- }
- buildStaticCache();
+
+  buildStaticCache();
 }
 function board(){
  if(mode===3)hunter=freeRoamRole==='hunter'?0:1;
@@ -246,15 +352,30 @@ function board(){
 function newRound(){board();state='play';show('')}
 function show(h){ov.innerHTML=h;ov.style.display=h?'flex':'none';updateMobileActionVisibility()}
 function currentPlayerIndex(){return netRole==='guest'?1:0}
-function updateMobileActionVisibility(){
- const button=document.getElementById('mobileFire'),controls=document.getElementById('mobileControls');
- if(!button||!controls)return;
- const player=currentPlayerIndex(),activeTouchGame=state==='play'&&isTouchDevice;
- controls.style.display=activeTouchGame?'flex':'none';
- const canFire=activeTouchGame&&player===hunter;
- button.style.display=canFire?'':'none';
- button.setAttribute('aria-hidden',canFire?'false':'true');
- button.disabled=!canFire;
+function updateMobileActionVisibility() {
+  const button = document.getElementById('mobileFire');
+  const controls = document.getElementById('mobileControls');
+
+  if (!button || !controls) return;
+
+  const activeTouchGame = state === 'play' && isTouchDevice;
+
+  // Hide all mobile controls outside active gameplay.
+  controls.style.display = activeTouchGame ? 'flex' : 'none';
+  controls.setAttribute(
+    'aria-hidden',
+    activeTouchGame ? 'false' : 'true'
+  );
+
+  // Show FIRE/TAG only when the local player is the Hunter.
+  const player = currentPlayerIndex();
+  const canFire =
+    activeTouchGame &&
+    mode !== 3 &&
+    player === hunter;
+
+  button.style.display = canFire ? '' : 'none';
+  button.setAttribute('aria-hidden', canFire ? 'false' : 'true');
 }
 function menu(){
  if(netRole!=='none')closeOnlineRoom(false);
