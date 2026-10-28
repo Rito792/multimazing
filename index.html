@@ -1,12 +1,11 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Shift Tag</title>
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"
-onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'"></script>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/peerjs@1.5.4/dist/peerjs.min.js'"></script>
+
 <style>
 :root{--bg:#e9e4d6;--fg:#1d2a1f;--pan:#fbf8ef;--mut:#5f6b5c;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16201a;--fg:#e8efe2;--pan:#22312a;--mut:#9db09a;color-scheme:dark}}
@@ -33,9 +32,22 @@ button:focus-visible{outline:3px solid #fff;outline-offset:2px}
 #ov .muted{font-size:13px;opacity:.8}
 #ov .status{min-height:1.4em;font-size:14px}
 #ov .row{display:flex;flex-wrap:wrap;justify-content:center;gap:8px}
+
+/* Mobile game controls */
+#mobileControls{display:none;width:100%;max-width:520px;align-items:center;justify-content:space-between;gap:18px;touch-action:none;user-select:none;-webkit-user-select:none}
+#dpad{display:grid;grid-template-columns:repeat(3,54px);grid-template-rows:repeat(3,48px);gap:4px}
+#mobileControls button{padding:0;min-width:0;min-height:0;border:2px solid rgba(255,255,255,.3);border-radius:12px;background:#293b30;color:#fff;font-size:23px;box-shadow:0 3px 0 #101a13;touch-action:none;-webkit-tap-highlight-color:transparent}
+#mobileControls button:active{background:#4b6b53;transform:translateY(2px);box-shadow:0 1px 0 #101a13}
+#dpad button[data-dir="up"]{grid-column:2;grid-row:1}
+#dpad button[data-dir="left"]{grid-column:1;grid-row:2}
+#dpad button[data-dir="down"]{grid-column:2;grid-row:3}
+#dpad button[data-dir="right"]{grid-column:3;grid-row:2}
+#mobileFire{width:86px;height:86px;border-radius:50%!important;background:#b9362c!important;font-size:16px!important;line-height:1.1}
+@media(hover:none),(pointer:coarse){#mobileControls{display:flex}}
 #help{margin:0;max-width:520px;color:var(--mut);font-size:13px;text-align:center}
 </style>
 </head>
+
 <body>
 <div id="hud">
   <div class="pc" id="a"></div>
@@ -48,7 +60,18 @@ button:focus-visible{outline:3px solid #fff;outline-offset:2px}
   <div id="ov"></div>
 </div>
 
-<p id="help">Solo/local: P1 uses WASD + F/Space; local P2 uses arrow keys + Enter. Online guest: use arrow keys + Enter, or swipe/tap on mobile. The Hunter can tag the Prey within 2 tiles if no wall is between them; the Prey reaches the glowing gate. Roles swap every 5 seconds. Stand still for more than 2 seconds and your opponent wins the round. First to 5 wins.</p>
+<!-- Mobile controls -->
+<div id="mobileControls" aria-label="Mobile game controls">
+  <div id="dpad" aria-label="Movement">
+    <button type="button" data-dir="up" aria-label="Move up">▲</button>
+    <button type="button" data-dir="left" aria-label="Move left">◀</button>
+    <button type="button" data-dir="down" aria-label="Move down">▼</button>
+    <button type="button" data-dir="right" aria-label="Move right">▶</button>
+  </div>
+  <button type="button" id="mobileFire" aria-label="Fire or tag">FIRE<br>TAG</button>
+</div>
+
+<p id="help">Solo/local: P1 uses WASD + F/Space; local P2 uses arrow keys + Enter. Online guest: use arrow keys + Enter, or the mobile controls below. The Hunter can tag the Prey within 2 tiles if no wall is between them; the Prey reaches the glowing gate. Roles swap every 5 seconds. Stand still for more than 2 seconds and your opponent wins the round. First to 5 wins.</p>
 
 <script>
 const N=16,CY=5,T=32,H=14,c=document.getElementById('c'),g=c.getContext('2d'),ov=document.getElementById('ov');
@@ -56,7 +79,7 @@ const D=[[0,-1],[0,1],[-1,0],[1,0]],K=[{u:'w',d:'s',l:'a',r:'d'},{u:'arrowup',d:
 
 let grid,exit,pl,mode=0,state='menu',score=[0,0],hunter=0,startH=0,time=5,flash=0,last=0,msgT=0,lastSec=0,ac,keys={};
 
-// ONLINE MULTIPLAYER SETTINGS
+// Online multiplayer: one host simulates the match; the guest sends inputs and receives snapshots.
 let peer=null,conn=null,netRole='none',roomCode='',netConnected=false,netInputTimer=0,netSnapshotAt=0,netGameStarted=false,netLastOverlay='',netOpenTimeout=null;
 
 function clearNetOpenTimeout(){
@@ -79,86 +102,120 @@ function armNetOpenTimeout(kind,expectedPeer){
 }
 
 const ROOM_PREFIX='shifttag-';
-const ok=(x,y)=>x>=0&&y>=0&&x<N&&y<N,R=n=>Math.random()*n|0,nm=i=>i?(mode===1?'CPU':'P2'):'P1';
+const ok=(x,y)=>x>=0&&y>=0&&x<N&&y<N;
+const R=n=>Math.random()*n|0;
+const nm=i=>i?(mode===1?'CPU':'P2'):'P1';
 
 function sfx(f,d=.1,t='square'){
   if(!ac)return;
   const o=ac.createOscillator(),v=ac.createGain();
-  o.type=t;o.frequency.value=f;v.gain.value=.05;
-  o.connect(v);v.connect(ac.destination);o.start();
+  o.type=t;
+  o.frequency.value=f;
+  v.gain.value=.05;
+  o.connect(v);
+  v.connect(ac.destination);
+  o.start();
   v.gain.exponentialRampToValueAtTime(.001,ac.currentTime+d);
   o.stop(ac.currentTime+d);
 }
 
 let lastThud=0;
+
 function thud(){
   const n=performance.now();
   if(n-lastThud<250)return;
-  lastThud=n;sfx(90,.12,'sine');sfx(60,.1,'square');
+  lastThud=n;
+  sfx(90,.12,'sine');
+  sfx(60,.1,'square');
 }
 
 function bang(){
   if(!ac)return;
-  const n=ac.sampleRate*.25|0,b=ac.createBuffer(1,n,ac.sampleRate),d=b.getChannelData(0);
+  const n=ac.sampleRate*.25|0;
+  const b=ac.createBuffer(1,n,ac.sampleRate);
+  const d=b.getChannelData(0);
   for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*(1-i/n)**2;
   const s=ac.createBufferSource(),v=ac.createGain();
-  s.buffer=b;v.gain.value=.3;s.connect(v);v.connect(ac.destination);s.start();
+  s.buffer=b;
+  v.gain.value=.3;
+  s.connect(v);
+  v.connect(ac.destination);
+  s.start();
   sfx(90,.2,'sawtooth');
 }
 
+// Line of sight: walls between shooter and target block the shot.
 function los(a,b){
   const dx=b.x-a.x,dy=b.y-a.y,n=Math.max(Math.abs(dx),Math.abs(dy))*4;
   if(Math.abs(dx)==1&&Math.abs(dy)==1&&grid[a.y][b.x]&&grid[b.y][a.x])return 0;
-  for(let s=1;s<n;s++)
+  for(let s=1;s<n;s++){
     if(grid[Math.round(a.y+dy*s/n)][Math.round(a.x+dx*s/n)])return 0;
+  }
   return 1;
 }
 
 function fire(i){
   const p=pl[i],o=pl[1-i];
   if(state!='play'||i!=hunter||p.fc>0)return;
-  p.fc=.4;p.shot=.25;
+  p.fc=.4;
+  p.shot=.25;
   const dx=o.x-p.x,dy=o.y-p.y;
   if(dx*dx+dy*dy>4)return bang();
-  if(!los(p,o)){bang();return sfx(1600,.06)}
+  if(!los(p,o)){
+    bang();
+    return sfx(1600,.06);
+  }
   end(i,'Shot the Prey!');
 }
 
 function bfs(a,b,blk){
-  const k=(x,y)=>y*N+x,prev=new Map([[k(a.x,a.y),null]]),q=[a];
+  const k=(x,y)=>y*N+x;
+  const prev=new Map([[k(a.x,a.y),null]]);
+  const q=[a];
+
   for(let i=0;i<q.length;i++){
     const p=q[i];
     if(p.x==b.x&&p.y==b.y){
-      const path=[];let cur=k(p.x,p.y);
-      while(cur!==null){path.push({x:cur%N,y:cur/N|0});cur=prev.get(cur)}
+      const path=[];
+      let cur=k(p.x,p.y);
+      while(cur!==null){
+        path.push({x:cur%N,y:cur/N|0});
+        cur=prev.get(cur);
+      }
       return path.reverse();
     }
+
     for(const[dx,dy]of D){
       const x=p.x+dx,y=p.y+dy;
       if(!ok(x,y)||grid[y][x]||prev.has(k(x,y))||(blk&&blk.has(k(x,y))))continue;
-      prev.set(k(x,y),k(p.x,p.y));q.push({x,y});
+      prev.set(k(x,y),k(p.x,p.y));
+      q.push({x,y});
     }
   }
   return null;
 }
 
 function flood(a){
-  const d=new Array(N*N).fill(-1),q=[a];d[a.y*N+a.x]=0;
+  const d=new Array(N*N).fill(-1),q=[a];
+  d[a.y*N+a.x]=0;
   for(let i=0;i<q.length;i++){
     const p=q[i];
     for(const[dx,dy]of D){
       const x=p.x+dx,y=p.y+dy;
       if(ok(x,y)&&!grid[y][x]&&d[y*N+x]<0){
-        d[y*N+x]=d[p.y*N+p.x]+1;q.push({x,y});
+        d[y*N+x]=d[p.y*N+p.x]+1;
+        q.push({x,y});
       }
     }
   }
   return d;
 }
 
+// Recursive division: walls have one or two gaps.
 function divide(x,y,w,h,m){
   if(w<m||h<m)return;
   const hz=w==h?Math.random()<.5:h>w;
+
   if(hz){
     const wy=y+1+R(h-2);
     for(let i=x;i<x+w;i++)grid[wy][i]=1;
@@ -174,6 +231,7 @@ function divide(x,y,w,h,m){
   }
 }
 
+// Generate and validate the maze.
 function gen(){
   for(let t=0;t<300;t++){
     grid=Array.from({length:N},()=>Array(N).fill(0));
@@ -186,11 +244,15 @@ function gen(){
 
     for(const p of pl){
       grid[p.y][p.x]=0;
-      for(const[a,b]of D)if(ok(p.x+a,p.y+b))grid[p.y+b][p.x+a]=0;
+      for(const[a,b]of D){
+        if(ok(p.x+a,p.y+b))grid[p.y+b][p.x+a]=0;
+      }
     }
 
     const hp=pl[hunter],pp=pl[1-hunter],dist=flood(pp),per=[];
-    for(let i=0;i<N;i++)per.push({x:i,y:0},{x:i,y:N-1},{x:0,y:i},{x:N-1,y:i});
+    for(let i=0;i<N;i++){
+      per.push({x:i,y:0},{x:i,y:N-1},{x:0,y:i},{x:N-1,y:i});
+    }
 
     const dd=e=>dist[e.y*N+e.x];
     const open=per.filter(e=>!grid[e.y][e.x]&&dd(e)>0&&!pl.some(p=>p.x==e.x&&p.y==e.y));
@@ -203,36 +265,64 @@ function gen(){
     const p1=bfs(pp,exit);
     if(!p1)continue;
     if(t<120&&p1.length-1<1.3*(Math.abs(exit.x-pp.x)+Math.abs(exit.y-pp.y)))continue;
+
     const blk=new Set(p1.slice(1,-1).map(q=>q.y*N+q.x));
     if(bfs(pp,exit,blk))return;
   }
 }
 
 function board(){
-  hunter=startH;startH^=1;
-  pl=[{x:1,y:1},{x:14,y:14}].map(p=>({...p,px:p.x,py:p.y,shot:0,fc:0,idle:0,bt:0,buf:null,ph:0,fx:0,fy:1,cd:0}));
-  time=CY;lastSec=0;flash=0;gen();
+  hunter=startH;
+  startH^=1;
+  pl=[{x:1,y:1},{x:14,y:14}].map(p=>({
+    ...p,px:p.x,py:p.y,shot:0,fc:0,idle:0,bt:0,buf:null,ph:0,fx:0,fy:1,cd:0
+  }));
+  time=CY;
+  lastSec=0;
+  flash=0;
+  gen();
 }
 
-function newRound(){board();state='play';show('')}
-function show(h){ov.innerHTML=h;ov.style.display=h?'flex':'none'}
+function newRound(){
+  board();
+  state='play';
+  show('');
+}
+
+function show(h){
+  ov.innerHTML=h;
+  ov.style.display=h?'flex':'none';
+}
 
 function menu(){
   if(netRole!=='none')closeOnlineRoom(false);
-  state='menu';mode=0;
+  state='menu';
+  mode=0;
   show('<h2>Shift Tag</h2><p>Hunter and Prey swap every 5 seconds while the maze rebuilds around you. Shoot the Prey, or escape through the gate.</p><button onclick="start(1)">Play vs computer</button><button onclick="start(0)">Play locally · 2 players</button><button onclick="onlineMenu()">Play with friends online</button>');
 }
 
 function start(ai){
-  closeOnlineRoom(false);mode=ai;netRole='none';netConnected=false;netGameStarted=false;
+  closeOnlineRoom(false);
+  mode=ai;
+  netRole='none';
+  netConnected=false;
+  netGameStarted=false;
   ac=ac||new (window.AudioContext||window.webkitAudioContext)();
-  score=[0,0];startH=0;newRound();
+  score=[0,0];
+  startH=0;
+  newRound();
 }
 
 function end(w,msg){
   score[w]++;
-  if(w==hunter){pl[w].shot=.5;bang();sh=.3}
-  state='msg';msgT=1.8;sfx(w?660:880,.3);
+  if(w==hunter){
+    pl[w].shot=.5;
+    bang();
+    sh=.3;
+  }
+  state='msg';
+  msgT=1.8;
+  sfx(w?660:880,.3);
   show(`<h2>${nm(w)} scores!</h2><p>${msg}</p>`);
 }
 
@@ -246,15 +336,18 @@ function over(){
   }
 }
 
-// ONLINE MENU
 function onlineMenu(){
-  closeOnlineRoom(false);state='menu';mode=2;
+  closeOnlineRoom(false);
+  state='menu';
+  mode=2;
   show('<h2>Play with friends</h2><p>Create a room and share its code, or enter a friend\'s code to join.</p><div class="row"><button onclick="createOnlineRoom()">Create room</button></div><input id="roomCodeInput" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="6-CHAR CODE" aria-label="Room code"><div class="row"><button onclick="joinOnlineRoom()">Join room</button><button onclick="menu()">Back</button></div><p id="netStatus" class="status" role="status">Both players need an internet connection.</p>');
   const field=document.getElementById('roomCodeInput');
   if(field){
     const q=new URLSearchParams(location.search).get('room');
     if(q)field.value=q.toUpperCase();
-    field.addEventListener('keydown',e=>{if(e.key==='Enter')joinOnlineRoom()});
+    field.addEventListener('keydown',e=>{
+      if(e.key==='Enter')joinOnlineRoom();
+    });
   }
 }
 
@@ -272,12 +365,16 @@ function newRoomCode(){
 
 function sendNet(data){
   if(conn&&conn.open){
-    try{conn.send(data);return true}catch(e){console.warn('Network send failed',e)}
+    try{
+      conn.send(data);
+      return true;
+    }catch(e){
+      console.warn('Network send failed',e);
+    }
   }
   return false;
 }
 
-// HOST: CREATE ROOM
 function createOnlineRoom(){
   if(!window.Peer){
     netStatus('Could not load PeerJS. Check your internet connection and reload this page.');
@@ -285,13 +382,16 @@ function createOnlineRoom(){
   }
 
   closeOnlineRoom(false);
-  netRole='host';roomCode=newRoomCode();netConnected=false;netGameStarted=false;mode=2;state='lobby';
+  netRole='host';
+  roomCode=newRoomCode();
+  netConnected=false;
+  netGameStarted=false;
+  mode=2;
+  state='lobby';
   show('<h2>Creating room…</h2><p id="netStatus" class="status">Connecting to the online signaling service.</p><button onclick="closeOnlineRoom()">Cancel</button>');
 
   try{
-    peer=new Peer(ROOM_PREFIX+roomCode.toLowerCase(),{
-      host:'0.peerjs.com',port:443,path:'/',secure:true,debug:1
-    });
+    peer=new Peer(ROOM_PREFIX+roomCode.toLowerCase(),{host:'0.peerjs.com',port:443,path:'/',secure:true,debug:1});
   }catch(e){
     netRole='none';
     show('<h2>Could not create room</h2><p>Peer connection setup failed. Please reload and try again.</p><button onclick="onlineMenu()">Back</button>');
@@ -308,7 +408,10 @@ function createOnlineRoom(){
   });
 
   peer.on('connection',incoming=>{
-    if(netRole!=='host'||(conn&&conn.open)){incoming.close();return}
+    if(netRole!=='host'||(conn&&conn.open)){
+      incoming.close();
+      return;
+    }
     conn=incoming;
     wireConnection(conn,'host');
   });
@@ -326,10 +429,9 @@ function createOnlineRoom(){
 }
 
 function showHostLobby(){
-  state='lobby';mode=2;
-  const invite=location.origin&&location.origin!=='null'
-    ?location.href.split('?')[0]+'?room='+roomCode:'';
-
+  state='lobby';
+  mode=2;
+  const invite=location.origin&&location.origin!=='null'?location.href.split('?')[0]+'?room='+roomCode:'';
   show(`<h2>Your room</h2><p>Share this code with your friend.</p><div class="room-code">${roomCode}</div><div class="row"><button onclick="copyRoomCode()">Copy code</button>${invite?'<button onclick="copyInviteLink()">Copy invite link</button>':''}</div><p class="status" id="netStatus">${netConnected?'Friend connected. Ready when you are.':'Waiting for your friend to enter the code…'}</p><div class="row"><button onclick="startOnlineMatch(false)" ${netConnected?'':'disabled'} id="startMatchButton">Start match</button><button onclick="closeOnlineRoom()">Cancel</button></div><p class="muted">Keep this tab open until the match ends.</p>`);
 }
 
@@ -351,7 +453,6 @@ async function copyInviteLink(){
   }
 }
 
-// GUEST: JOIN ROOM
 function joinOnlineRoom(){
   const field=document.getElementById('roomCodeInput');
   const code=(field?field.value:'').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
@@ -367,13 +468,16 @@ function joinOnlineRoom(){
   }
 
   closeOnlineRoom(false);
-  netRole='guest';roomCode=code;mode=2;netConnected=false;netGameStarted=false;state='lobby';
+  netRole='guest';
+  roomCode=code;
+  mode=2;
+  netConnected=false;
+  netGameStarted=false;
+  state='lobby';
   show('<h2>Joining room…</h2><p class="status" id="netStatus">Contacting the host…</p><button onclick="closeOnlineRoom()">Cancel</button>');
 
   try{
-    peer=new Peer(undefined,{
-      host:'0.peerjs.com',port:443,path:'/',secure:true,debug:1
-    });
+    peer=new Peer(undefined,{host:'0.peerjs.com',port:443,path:'/',secure:true,debug:1});
   }catch(e){
     show('<h2>Unable to join</h2><p>Peer connection setup failed. Please try again.</p><button onclick="onlineMenu()">Back</button>');
     return;
@@ -385,6 +489,7 @@ function joinOnlineRoom(){
   peer.on('open',()=>{
     if(netRole!=='guest'||peer!==openingPeer)return;
     clearNetOpenTimeout();
+
     try{
       conn=peer.connect(ROOM_PREFIX+roomCode.toLowerCase(),{reliable:true});
       wireConnection(conn,'guest');
@@ -423,7 +528,8 @@ function wireConnection(connection,role){
     if(role==='host'){
       showHostLobby();
     }else{
-      state='lobby';mode=2;
+      state='lobby';
+      mode=2;
       show('<h2>Connected!</h2><p>Waiting for the host to start the match…</p><p class="status">Keep this tab open.</p><button onclick="closeOnlineRoom()">Leave room</button>');
       sendNet({type:'hello'});
     }
@@ -462,33 +568,45 @@ function startOnlineMatch(rematch){
     return;
   }
 
-  mode=2;netGameStarted=true;score=rematch?[0,0]:[0,0];startH=0;
+  mode=2;
+  netGameStarted=true;
+  score=rematch?[0,0]:[0,0];
+  startH=0;
   ac=ac||new (window.AudioContext||window.webkitAudioContext)();
-  newRound();netSnapshotAt=0;broadcastSnapshot();
+  newRound();
+  netSnapshotAt=0;
+  broadcastSnapshot();
 }
 
 function broadcastSnapshot(){
   if(netRole!=='host'||!netConnected||!conn||!conn.open||!grid||!pl)return;
-  sendNet({
-    type:'snapshot',state,grid,exit,pl,hunter,startH,time,flash,
-    score,mode:2,msgT,overlay:state==='msg'?ov.innerHTML:'',netGameStarted
-  });
+  sendNet({type:'snapshot',state,grid,exit,pl,hunter,startH,time,flash,score,mode:2,msgT,overlay:state==='msg'?ov.innerHTML:'',netGameStarted});
 }
 
 function applySnapshot(data){
   if(netRole!=='guest'||!data.grid||!Array.isArray(data.pl)||data.pl.length!==2)return;
 
   const oldState=state;
-  grid=data.grid;exit=data.exit;pl=data.pl;hunter=data.hunter;
-  startH=data.startH;time=data.time;flash=data.flash;score=data.score;
-  mode=2;msgT=data.msgT;state=data.state;
-  netGameStarted=!!data.netGameStarted;netConnected=true;
+  grid=data.grid;
+  exit=data.exit;
+  pl=data.pl;
+  hunter=data.hunter;
+  startH=data.startH;
+  time=data.time;
+  flash=data.flash;
+  score=data.score;
+  mode=2;
+  msgT=data.msgT;
+  state=data.state;
+  netGameStarted=!!data.netGameStarted;
+  netConnected=true;
 
   if(state==='over'){
     const winner=score[0]>score[1]?0:1;
     const html=`<h2>${nm(winner)} wins the match!</h2><p>${score[0]} – ${score[1]}</p><p>The host can start a rematch.</p><button onclick="closeOnlineRoom()">Leave room</button>`;
     if(oldState!=='over'||netLastOverlay!==html){
-      show(html);netLastOverlay=html;
+      show(html);
+      netLastOverlay=html;
     }
   }else if(state==='msg'){
     if(oldState!=='msg'||netLastOverlay!==data.overlay){
@@ -501,15 +619,24 @@ function applySnapshot(data){
 }
 
 function handleDisconnect(){
-  netConnected=false;netGameStarted=false;state='lobby';
+  netConnected=false;
+  netGameStarted=false;
+  state='lobby';
   show('<h2>Friend disconnected</h2><p>The online match has ended because the connection closed.</p><div class="row"><button onclick="onlineMenu()">Back to online menu</button><button onclick="closeOnlineRoom()">Main menu</button></div>');
 }
 
 function closeOnlineRoom(returnToMenu=true){
   clearNetOpenTimeout();
   const oldConn=conn,oldPeer=peer;
-  conn=null;peer=null;netRole='none';roomCode='';
-  netConnected=false;netGameStarted=false;netInputTimer=0;netSnapshotAt=0;netLastOverlay='';
+  conn=null;
+  peer=null;
+  netRole='none';
+  roomCode='';
+  netConnected=false;
+  netGameStarted=false;
+  netInputTimer=0;
+  netSnapshotAt=0;
+  netLastOverlay='';
 
   try{if(oldConn)oldConn.close()}catch(e){}
   try{if(oldPeer&&!oldPeer.destroyed)oldPeer.destroy()}catch(e){}
@@ -518,7 +645,13 @@ function closeOnlineRoom(returnToMenu=true){
 }
 
 function shift(){
-  hunter^=1;flash=3;lastSec=0;sfx(220,.4,'sawtooth');sfx(880,.15);gen();
+  hunter^=1;
+  flash=3;
+  lastSec=0;
+  sfx(220,.4,'sawtooth');
+  sfx(880,.15);
+  gen();
+
   const a=pl[hunter],b=pl[1-hunter];
   if(Math.abs(a.x-b.x)+Math.abs(a.y-b.y)==1)return end(hunter,'Instant tag at the flip!');
   time=CY;
@@ -527,34 +660,54 @@ function shift(){
 function tryMove(i,dx,dy){
   if(state!='play')return;
   const p=pl[i],x=p.x+dx,y=p.y+dy,o=pl[1-i];
-  p.fx=dx;p.fy=dy;
+  p.fx=dx;
+  p.fy=dy;
+
   if(!ok(x,y)||grid[y][x])return thud();
   if(x==o.x&&y==o.y)return thud(),end(i==hunter?i:1-i,i==hunter?'Shot the Prey!':'Ran into the Hunter!');
 
-  for(let k=0;k<2;k++)PT.push({x:p.px*T+T/2+R(10)-5,y:p.py*T+H+T-4,vx:Math.random()-.5,vy:-Math.random()*.5,l:.35});
-  p.x=x;p.y=y;p.idle=0;sfx(170+i*70,.04,'triangle');
+  for(let k=0;k<2;k++){
+    PT.push({x:p.px*T+T/2+R(10)-5,y:p.py*T+H+T-4,vx:Math.random()-.5,vy:-Math.random()*.5,l:.35});
+  }
+
+  p.x=x;
+  p.y=y;
+  p.idle=0;
+  sfx(170+i*70,.04,'triangle');
+
   if(i!=hunter&&x==exit.x&&y==exit.y)end(i,'Escaped through the gate!');
 }
 
 function ai(){
-  const me=pl[1],o=pl[0];let path;
+  const me=pl[1],o=pl[0];
+  let path;
+
   if(hunter==1){
     const dx=o.x-me.x,dy=o.y-me.y;
     if(dx*dx+dy*dy<=4&&los(me,o)&&Math.random()<.6)return fire(1);
   }
-  if(hunter==1)path=bfs(me,o);
-  else{
+
+  if(hunter==1){
+    path=bfs(me,o);
+  }else{
     const blk=new Set([o.y*N+o.x]);
-    for(const[a,b]of D)if(ok(o.x+a,o.y+b))blk.add((o.y+b)*N+o.x+a);
+    for(const[a,b]of D){
+      if(ok(o.x+a,o.y+b))blk.add((o.y+b)*N+o.x+a);
+    }
     path=bfs(me,exit,blk);
   }
+
   if(path&&path.length>1)return tryMove(1,path[1].x-me.x,path[1].y-me.y);
+
   let best=null,bd=-1;
   for(const[a,b]of D){
     const x=me.x+a,y=me.y+b;
     if(ok(x,y)&&!grid[y][x]){
       const d=Math.abs(x-o.x)+Math.abs(y-o.y);
-      if(d>bd){bd=d;best=[a,b]}
+      if(d>bd){
+        bd=d;
+        best=[a,b];
+      }
     }
   }
   if(best)tryMove(1,...best);
@@ -562,40 +715,69 @@ function ai(){
 
 const DIRS=[['u',[0,-1]],['d',[0,1]],['l',[-1,0]],['r',[1,0]]];
 
+// Latest key pressed wins.
 function dirOf(i){
   let b=null,bt=0;
   const schemes=(mode===1&&netRole==='none'&&i===0)?[K[0],K[1]]:[K[i]];
-  for(const k of schemes)for(const[n,v]of DIRS){
-    const t=keys[k[n]];
-    if(t>bt){bt=t;b=v}
+  for(const k of schemes){
+    for(const[n,v]of DIRS){
+      const t=keys[k[n]];
+      if(t>bt){
+        bt=t;
+        b=v;
+      }
+    }
   }
   return b;
 }
 
 function keyDir(i,key){
   const schemes=(mode===1&&netRole==='none'&&i===0)?[K[0],K[1]]:[K[i]];
-  for(const k of schemes)for(const[n,v]of DIRS)if(k[n]==key)return v;
+  for(const k of schemes){
+    for(const[n,v]of DIRS){
+      if(k[n]==key)return v;
+    }
+  }
 }
 
 function update(dt){
   if(flash<=0)time-=dt;
+
   if(time<=2&&time>0&&Math.ceil(time)!=lastSec){
-    lastSec=Math.ceil(time);sfx(520+(3-lastSec)*120,.08);
+    lastSec=Math.ceil(time);
+    sfx(520+(3-lastSec)*120,.08);
   }
-  if(time<=0){shift();if(state!='play')return}
+
+  if(time<=0){
+    shift();
+    if(state!='play')return;
+  }
 
   for(let i=0;i<2;i++){
-    const p=pl[i];p.idle+=dt;
+    const p=pl[i];
+    p.idle+=dt;
     if(p.idle>2)return end(1-i,nm(i)+' stood still too long!');
-    p.cd-=dt;p.bt-=dt;
+
+    p.cd-=dt;
+    p.bt-=dt;
     if(p.cd>0)continue;
 
-    if(i===1&&mode===1){p.cd=.18;ai()}
-    else if(netRole==='host'&&i===1){p.cd=0;continue}
-    else{
+    if(i===1&&mode===1){
+      p.cd=.11;
+      ai();
+    }else if(netRole==='host'&&i===1){
+      p.cd=0;
+      continue;
+    }else{
       const d=dirOf(i)||(p.bt>0?p.buf:null);
-      if(d){p.buf=null;p.bt=0;tryMove(i,...d);p.cd=.11}
+      if(d){
+        p.buf=null;
+        p.bt=0;
+        tryMove(i,...d);
+        p.cd=.11;
+      }
     }
+
     if(state!='play')return;
   }
 }
@@ -605,105 +787,201 @@ function human(p,i){
   const mvg=Math.abs(p.x-p.px)+Math.abs(p.y-p.py)>.05;
   const w=mvg?Math.round(Math.sin(p.ph)*3):0;
   const ax=o.x-p.x,ay=o.y-p.y;
-  const adx=Math.abs(ax)>=Math.abs(ay)?Math.sign(ax):0,ady=adx?0:Math.sign(ay);
+  const adx=Math.abs(ax)>=Math.abs(ay)?Math.sign(ax):0;
+  const ady=adx?0:Math.sign(ay);
   const rc=p.shot>0?Math.min(1,p.shot/.25):0;
-  const x=x0-adx*rc*3,y=y0+(mvg?-Math.abs(Math.sin(p.ph))*2:Math.sin(performance.now()/380+i*2)*.7)-ady*rc*2;
+  const x=x0-adx*rc*3;
+  const y=y0+(mvg?-Math.abs(Math.sin(p.ph))*2:Math.sin(performance.now()/380+i*2)*.7)-ady*rc*2;
   const fx=h?adx:p.fx,fy=h?ady:p.fy;
 
   g.fillStyle='rgba(0,0,0,.32)';
-  g.beginPath();g.ellipse(x,y0+13,10-(y0-y),3.5,0,0,7);g.fill();
+  g.beginPath();
+  g.ellipse(x,y0+13,10-(y0-y),3.5,0,0,7);
+  g.fill();
+
   g.fillStyle='#262a35';
-  g.fillRect(x-5,y+5,4,8-Math.max(0,w));g.fillRect(x+1,y+5,4,8-Math.max(0,-w));
+  g.fillRect(x-5,y+5,4,8-Math.max(0,w));
+  g.fillRect(x+1,y+5,4,8-Math.max(0,-w));
   g.fillStyle='#14161c';
-  g.fillRect(x-6,y+11-Math.max(0,w),5,2);g.fillRect(x+1,y+11-Math.max(0,-w),5,2);
-  g.fillStyle='#10131a';g.fillRect(x-10,y-6,20,13);
+  g.fillRect(x-6,y+11-Math.max(0,w),5,2);
+  g.fillRect(x+1,y+11-Math.max(0,-w),5,2);
 
+  g.fillStyle='#10131a';
+  g.fillRect(x-10,y-6,20,13);
   const jc=h?'#d63a2b':'#2f6fd9',jd=h?'#a52a1e':'#2255b0';
-  g.fillStyle=jc;g.fillRect(x-6,y-5,12,11);g.fillRect(x-9,y-4-(w*.5|0),3,9);
-  g.fillStyle=jd;g.fillRect(x+1,y-5,5,11);g.fillRect(x+6,y-4+(w*.5|0),3,9);
-  g.fillStyle='#e8c25a';g.fillRect(x-6,y+3,12,2);
-  g.fillStyle='#f2c9a0';g.fillRect(x-9,y+4-(w*.5|0),3,2);g.fillRect(x+6,y+4+(w*.5|0),3,2);
+  g.fillStyle=jc;
+  g.fillRect(x-6,y-5,12,11);
+  g.fillRect(x-9,y-4-(w*.5|0),3,9);
+  g.fillStyle=jd;
+  g.fillRect(x+1,y-5,5,11);
+  g.fillRect(x+6,y-4+(w*.5|0),3,9);
+  g.fillStyle='#e8c25a';
+  g.fillRect(x-6,y+3,12,2);
 
-  g.fillStyle='#10131a';g.beginPath();g.arc(x,y-10,6.8,0,7);g.fill();
-  g.fillStyle='#f2c9a0';g.beginPath();g.arc(x,y-10,5.5,0,7);g.fill();
+  g.fillStyle='#f2c9a0';
+  g.fillRect(x-9,y+4-(w*.5|0),3,2);
+  g.fillRect(x+6,y+4+(w*.5|0),3,2);
+  g.fillStyle='#10131a';
+  g.beginPath();
+  g.arc(x,y-10,6.8,0,7);
+  g.fill();
+  g.fillStyle='#f2c9a0';
+  g.beginPath();
+  g.arc(x,y-10,5.5,0,7);
+  g.fill();
+
   g.fillStyle=h?'#7a1c14':'#3a2a1e';
-  g.beginPath();g.arc(x,y-10,5.5,fy<0?0:Math.PI,fy<0?7:0);g.fill();
+  g.beginPath();
+  g.arc(x,y-10,5.5,fy<0?0:Math.PI,fy<0?7:0);
+  g.fill();
   if(h)g.fillRect(x-7,y-11,14,2);
 
   if(fy>=0){
-    g.fillStyle='#111';const ex=fx*2;
-    g.fillRect(x-3+ex,y-9,2,2);g.fillRect(x+1+ex,y-9,2,2);
+    g.fillStyle='#111';
+    const ex=fx*2;
+    g.fillRect(x-3+ex,y-9,2,2);
+    g.fillRect(x+1+ex,y-9,2,2);
   }
 
   if(h){
-    g.strokeStyle='rgba(224,74,56,.45)';g.lineWidth=1.5;g.setLineDash([5,5]);
-    g.beginPath();g.arc(x0,y0,2*T,0,7);g.stroke();g.setLineDash([]);
-    const dx=adx,dy=ady,L=14-rc*4,sw=Math.sin(performance.now()/160)*.8*(1-rc);
+    g.strokeStyle='rgba(224,74,56,.45)';
+    g.lineWidth=1.5;
+    g.setLineDash([5,5]);
+    g.beginPath();
+    g.arc(x0,y0,2*T,0,7);
+    g.stroke();
+    g.setLineDash([]);
+
+    const dx=adx,dy=ady,L=14-rc*4;
+    const sw=Math.sin(performance.now()/160)*.8*(1-rc);
     const gx=x+dx*L+Math.abs(dy)*sw,gy=y-1+dy*L+Math.abs(dx)*sw;
-    g.strokeStyle='#111';g.lineWidth=3;g.lineCap='round';
-    g.beginPath();g.moveTo(x+dx*4,y-1+dy*4);g.lineTo(gx,gy);g.stroke();
-    g.strokeStyle='#6a6f7a';g.lineWidth=1;g.stroke();
-    g.fillStyle='#f2c9a0';g.beginPath();g.arc(x+dx*5,y-1+dy*5,2.5,0,7);g.fill();
+
+    g.strokeStyle='#111';
+    g.lineWidth=3;
+    g.lineCap='round';
+    g.beginPath();
+    g.moveTo(x+dx*4,y-1+dy*4);
+    g.lineTo(gx,gy);
+    g.stroke();
+
+    g.strokeStyle='#6a6f7a';
+    g.lineWidth=1;
+    g.stroke();
+
+    g.fillStyle='#f2c9a0';
+    g.beginPath();
+    g.arc(x+dx*5,y-1+dy*5,2.5,0,7);
+    g.fill();
 
     if(p.shot>0){
-      g.strokeStyle='rgba(255,235,150,'+Math.min(1,p.shot*5)+')';g.lineWidth=2;
-      g.beginPath();g.moveTo(gx,gy);g.lineTo(gx+dx*2*T,gy+dy*2*T);g.stroke();
-      g.fillStyle='#ffb02e';g.beginPath();
+      g.strokeStyle='rgba(255,235,150,'+Math.min(1,p.shot*5)+')';
+      g.lineWidth=2;
+      g.beginPath();
+      g.moveTo(gx,gy);
+      g.lineTo(gx+dx*2*T,gy+dy*2*T);
+      g.stroke();
+
+      g.fillStyle='#ffb02e';
+      g.beginPath();
       for(let k=0;k<12;k++){
         const a=k*.5236+rc*2,r=(k%2?4:11)*rc+2;
         g.lineTo(gx+Math.cos(a)*r,gy+Math.sin(a)*r);
       }
-      g.closePath();g.fill();
-      g.fillStyle='#fff6c0';g.beginPath();g.arc(gx,gy,3.5*rc+1,0,7);g.fill();
+      g.closePath();
+      g.fill();
+
+      g.fillStyle='#fff6c0';
+      g.beginPath();
+      g.arc(gx,gy,3.5*rc+1,0,7);
+      g.fill();
     }
   }
 
-  g.fillStyle='#fff';g.strokeStyle='#000';g.lineWidth=3;g.font='bold 10px sans-serif';g.textAlign='center';
-  const l=i?'P2':'P1';g.strokeText(l,x,y-20);g.fillText(l,x,y-20);
-  if(p.idle>.7){g.fillStyle='#e04a38';g.fillRect(x-12,y-27,24*Math.min(1,p.idle/2),3)}
+  g.fillStyle='#fff';
+  g.strokeStyle='#000';
+  g.lineWidth=3;
+  g.font='bold 10px sans-serif';
+  g.textAlign='center';
+  const l=i?'P2':'P1';
+  g.strokeText(l,x,y-20);
+  g.fillText(l,x,y-20);
+
+  if(p.idle>.7){
+    g.fillStyle='#e04a38';
+    g.fillRect(x-12,y-27,24*Math.min(1,p.idle/2),3);
+  }
 }
 
+// Draw stone-brick textures.
 function mkTex(seed,moss,crack){
-  const cv=document.createElement('canvas');cv.width=T;cv.height=T+H;const q=cv.getContext('2d');
+  const cv=document.createElement('canvas');
+  cv.width=T;
+  cv.height=T+H;
+  const q=cv.getContext('2d');
   let s=seed;
   const r=()=>(s=s*16807%2147483647)/2147483647;
-  const dot=(x,y,c,w=1)=>{q.fillStyle=c;q.fillRect(x,y,w,w)},base=[];
+  const dot=(x,y,c,w=1)=>{q.fillStyle=c;q.fillRect(x,y,w,w)};
+  const base=[];
+
   for(let i=0;i<8;i++)base.push(110+r()*28|0);
-  for(let y=0;y<T+H;y++)for(let x=0;x<T;x++){
-    const col=x>>3,m=(y%T-(col&1)*8+T)%T,b=m>>4;
-    let v=base[col*2+b]+(r()*14-7|0);
-    if((x&7)==7||(m&15)==15)v=78;
-    else if((x&7)==0||(m&15)==0)v+=16;
-    dot(x,y,`rgb(${v},${v},${v+3})`);
-  }
-  if(moss)for(let k=0;k<4;k++){
-    const cx=r()*28|0,cy=r()*26|0;
-    for(let j=0;j<9;j++){
-      const x=cx+(r()*8-4|0),y=cy+(r()*10-5|0);
-      if(x>=0&&y>=0&&x<T-1&&y<T-1)dot(x,y,['#5f7f35','#4d6a2b','#7a9a46'][r()*3|0],2);
+
+  for(let y=0;y<T+H;y++){
+    for(let x=0;x<T;x++){
+      const col=x>>3,m=(y%T-(col&1)*8+T)%T,b=m>>4;
+      let v=base[col*2+b]+(r()*14-7|0);
+      if((x&7)==7||(m&15)==15)v=78;
+      else if((x&7)==0||(m&15)==0)v+=16;
+      dot(x,y,`rgb(${v},${v},${v+3})`);
     }
   }
+
+  if(moss){
+    for(let k=0;k<4;k++){
+      const cx=r()*28|0,cy=r()*26|0;
+      for(let j=0;j<9;j++){
+        const x=cx+(r()*8-4|0),y=cy+(r()*10-5|0);
+        if(x>=0&&y>=0&&x<T-1&&y<T-1)dot(x,y,['#5f7f35','#4d6a2b','#7a9a46'][r()*3|0],2);
+      }
+    }
+  }
+
   if(crack){
     let x=6+r()*18|0;
     for(let y=2+(r()*6|0),j=0;j<18&&y<T;y++,j++){
-      dot(x,y,'#47474a');x=Math.max(0,Math.min(T-1,x+(r()*3|0)-1));
+      dot(x,y,'#47474a');
+      x=Math.max(0,Math.min(T-1,x+(r()*3|0)-1));
     }
   }
-  q.fillStyle='rgba(0,0,0,.4)';q.fillRect(0,T,T,H);
+
+  q.fillStyle='rgba(0,0,0,.4)';
+  q.fillRect(0,T,T,H);
   return cv;
 }
 
 const TX=[[11111,0,0],[22222,1,0],[33333,0,1],[44444,1,0],[55555,0,0],[66666,1,1]].map(a=>mkTex(...a));
-function wall(x,y){g.drawImage(TX[((x+2)*7+(y+2)*13+(x+2)*(y+2))%6],x*T,y*T)}
 
+function wall(x,y){
+  g.drawImage(TX[((x+2)*7+(y+2)*13+(x+2)*(y+2))%6],x*T,y*T);
+}
+
+// Floor textures.
 function mkFloor(seed){
-  const cv=document.createElement('canvas');cv.width=cv.height=T;const q=cv.getContext('2d');
-  let s=seed;const r=()=>(s=s*16807%2147483647)/2147483647;
-  for(let y=0;y<T;y++)for(let x=0;x<T;x++){
-    let v=74+(r()*10|0);
-    if(x==T-1||y==T-1)v=56;else if(x==0||y==0)v=86;
-    q.fillStyle=`rgb(${v},${v+1},${v+6})`;q.fillRect(x,y,1,1);
+  const cv=document.createElement('canvas');
+  cv.width=cv.height=T;
+  const q=cv.getContext('2d');
+  let s=seed;
+  const r=()=>(s=s*16807%2147483647)/2147483647;
+
+  for(let y=0;y<T;y++){
+    for(let x=0;x<T;x++){
+      let v=74+(r()*10|0);
+      if(x==T-1||y==T-1)v=56;
+      else if(x==0||y==0)v=86;
+      q.fillStyle=`rgb(${v},${v+1},${v+6})`;
+      q.fillRect(x,y,1,1);
+    }
   }
+
   if(seed%2){
     q.fillStyle='rgba(95,127,53,.55)';
     for(let j=0;j<6;j++)q.fillRect(r()*26+3|0,r()*26+3|0,2,2);
@@ -720,12 +998,22 @@ function portal(x,y){
   gr.addColorStop(0,'rgba(120,255,220,'+(.7+.3*k)+')');
   gr.addColorStop(.5,'rgba(30,160,150,.5)');
   gr.addColorStop(1,'rgba(0,0,0,0)');
-  g.fillStyle=gr;g.fillRect(x-T/2,y-T/2,T*2,T*2);
-  g.fillStyle='#0b2a2e';g.beginPath();g.arc(cx,cy,12,0,7);g.fill();
-  g.lineWidth=2;g.strokeStyle='#7dffe0';
+  g.fillStyle=gr;
+  g.fillRect(x-T/2,y-T/2,T*2,T*2);
+
+  g.fillStyle='#0b2a2e';
+  g.beginPath();
+  g.arc(cx,cy,12,0,7);
+  g.fill();
+
+  g.lineWidth=2;
+  g.strokeStyle='#7dffe0';
   for(let i=0;i<3;i++){
-    g.beginPath();g.arc(cx,cy,5+i*3.5,t*2+i*2,t*2+i*2+2.2);g.stroke();
+    g.beginPath();
+    g.arc(cx,cy,5+i*3.5,t*2+i*2,t*2+i*2+2.2);
+    g.stroke();
   }
+
   g.fillStyle='#fff';
   for(let i=0;i<4;i++){
     const a=t*1.5+i*1.57,r=9+3*Math.sin(t*3+i);
@@ -738,22 +1026,33 @@ function draw(){
   g.save();
   g.translate(T+(sh>0?(Math.random()-.5)*8*sh:0),T+(sh>0?(Math.random()-.5)*8*sh:0));
 
-  for(let y=0;y<N;y++)for(let x=0;x<N;x++){
-    g.drawImage(FL[(x*5+y*3+x*y)%3],x*T,y*T+H);
-    if(y==0||grid[y-1][x]){
-      g.fillStyle='rgba(0,0,0,.28)';g.fillRect(x*T,y*T+H,T,3);
-      g.fillStyle='rgba(0,0,0,.16)';g.fillRect(x*T,y*T+H+3,T,3);
-    }
-    if(x==0||grid[y][x-1]){
-      g.fillStyle='rgba(0,0,0,.14)';g.fillRect(x*T,y*T+H,4,T);
+  for(let y=0;y<N;y++){
+    for(let x=0;x<N;x++){
+      g.drawImage(FL[(x*5+y*3+x*y)%3],x*T,y*T+H);
+
+      if(y==0||grid[y-1][x]){
+        g.fillStyle='rgba(0,0,0,.28)';
+        g.fillRect(x*T,y*T+H,T,3);
+        g.fillStyle='rgba(0,0,0,.16)';
+        g.fillRect(x*T,y*T+H+3,T,3);
+      }
+
+      if(x==0||grid[y][x-1]){
+        g.fillStyle='rgba(0,0,0,.14)';
+        g.fillRect(x*T,y*T+H,4,T);
+      }
     }
   }
 
   portal(exit.x*T,exit.y*T+H);
 
   for(let y=-1;y<=N;y++){
-    for(let x=-1;x<=N;x++)if(!ok(x,y)||grid[y][x])wall(x,y);
-    for(let i=0;i<2;i++)if(Math.round(pl[i].py)==y)human(pl[i],i);
+    for(let x=-1;x<=N;x++){
+      if(!ok(x,y)||grid[y][x])wall(x,y);
+    }
+    for(let i=0;i<2;i++){
+      if(Math.round(pl[i].py)==y)human(pl[i],i);
+    }
   }
 
   for(const q of PT){
@@ -765,9 +1064,13 @@ function draw(){
 
   if(flash>0){
     const a=Math.min(1,flash/.4);
-    g.fillStyle='rgba(255,255,255,'+a+')';g.fillRect(0,0,576,590);
-    g.fillStyle='rgba(20,30,20,'+a+')';g.font='bold 44px sans-serif';g.textAlign='center';
-    g.fillText('SHIFT!',288,285);g.font='bold 15px sans-serif';
+    g.fillStyle='rgba(255,255,255,'+a+')';
+    g.fillRect(0,0,576,590);
+    g.fillStyle='rgba(20,30,20,'+a+')';
+    g.font='bold 44px sans-serif';
+    g.textAlign='center';
+    g.fillText('SHIFT!',288,285);
+    g.font='bold 15px sans-serif';
     g.fillText(nm(hunter)+' is the Hunter now. Keep moving!',288,315);
   }
 }
@@ -783,7 +1086,8 @@ function hud(){
 }
 
 function loop(t){
-  const dt=Math.min(.05,(t-last)/1000||0);last=t;
+  const dt=Math.min(.05,(t-last)/1000||0);
+  last=t;
 
   if(netRole==='guest'&&state==='play'&&netConnected){
     netInputTimer-=dt;
@@ -801,22 +1105,31 @@ function loop(t){
   }
 
   if(netRole==='host'&&netConnected&&t-netSnapshotAt>55){
-    netSnapshotAt=t;broadcastSnapshot();
+    netSnapshotAt=t;
+    broadcastSnapshot();
   }
 
   flash=Math.max(0,flash-dt);
 
   pl.forEach((p,i)=>{
-    const sp=(mode&&i)?6:10;
+    // Both players use the same movement animation speed.
+    const sp=8;
     const mv=(a,b)=>Math.abs(b-a)<=dt*sp?b:a+Math.sign(b-a)*dt*sp;
     const ox=p.px,oy=p.py;
-    p.px=mv(p.px,p.x);p.py=mv(p.py,p.y);
+    p.px=mv(p.px,p.x);
+    p.py=mv(p.py,p.y);
     p.ph+=(Math.abs(p.px-ox)+Math.abs(p.py-oy))*3.4;
 
     if(p.shot>0&&!p.fl){
       p.fl=1;
-      PT.push({x:p.px*T+T/2,y:p.py*T+H+T/2-2,vx:(Math.random()<.5?-1:1)*(.6+Math.random()*.6),vy:-1.3,g:6,l:.55,c:'245,205,70'});
+      PT.push({
+        x:p.px*T+T/2,
+        y:p.py*T+H+T/2-2,
+        vx:(Math.random()<.5?-1:1)*(.6+Math.random()*.6),
+        vy:-1.3,g:6,l:.55,c:'245,205,70'
+      });
     }
+
     p.shot=Math.max(0,p.shot-dt);
     if(!p.shot)p.fl=0;
     p.fc=Math.max(0,p.fc-dt);
@@ -824,17 +1137,22 @@ function loop(t){
 
   for(let k=PT.length;k--;){
     const q=PT[k];
-    q.x+=q.vx*30*dt;q.y+=q.vy*30*dt;q.vy+=(q.g||0)*dt;
+    q.x+=q.vx*30*dt;
+    q.y+=q.vy*30*dt;
+    q.vy+=(q.g||0)*dt;
     if((q.l-=dt)<=0)PT.splice(k,1);
   }
 
   sh=Math.max(0,sh-dt);
-  draw();hud();requestAnimationFrame(loop);
+  draw();
+  hud();
+  requestAnimationFrame(loop);
 }
 
 addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   keys[k]=performance.now();
+
   if(k.startsWith('arrow')||k===' ')e.preventDefault();
 
   if(netRole==='guest'){
@@ -845,21 +1163,35 @@ addEventListener('keydown',e=>{
   if(!e.repeat){
     for(let i=0;i<2;i++){
       const v=keyDir(i,k);
-      if(v&&!(netRole==='host'&&i===1)){pl[i].buf=v;pl[i].bt=.14}
+      if(v&&!(netRole==='host'&&i===1)){
+        pl[i].buf=v;
+        pl[i].bt=.14;
+      }
     }
-    if(k==='f'||k===' '){fire(0)}
-    else if(netRole==='none'&&mode===1&&k==='enter'){fire(0)}
-    else if(netRole==='none'&&!mode&&(k==='enter'||k==='m')){fire(1)}
+
+    if(k==='f'||k===' '){
+      fire(0);
+    }else if(netRole==='none'&&mode===1&&k==='enter'){
+      fire(0);
+    }else if(netRole==='none'&&!mode&&(k==='enter'||k==='m')){
+      fire(1);
+    }
   }
 });
 
-addEventListener('keyup',e=>{keys[e.key.toLowerCase()]=0});
+addEventListener('keyup',e=>{
+  keys[e.key.toLowerCase()]=0;
+});
 
+// Existing canvas swipe controls remain available as a fallback.
 let ts;
-c.addEventListener('touchstart',e=>{ts=e.touches[0]},{passive:true});
+c.addEventListener('touchstart',e=>{
+  ts=e.touches[0];
+},{passive:true});
 
 c.addEventListener('touchend',e=>{
   if(!ts)return;
+
   const t=e.changedTouches[0],dx=t.clientX-ts.clientX,dy=t.clientY-ts.clientY;
 
   if(netRole==='guest'){
@@ -870,14 +1202,89 @@ c.addEventListener('touchend',e=>{
   }
 
   if(Math.max(Math.abs(dx),Math.abs(dy))<20)return fire(0);
+
   Math.abs(dx)>Math.abs(dy)
     ?tryMove(0,Math.sign(dx),0)
     :tryMove(0,0,Math.sign(dy));
 });
 
+// Automatically enable the mobile controls on phones and tablets.
+const mobileControls=document.getElementById('mobileControls');
+
+if(mobileControls&&(matchMedia('(pointer: coarse)').matches||navigator.maxTouchPoints>0)){
+  mobileControls.style.display='flex';
+}
+
+let mobileMoveTimer=null;
+
+function mobileMove(dx,dy){
+  if(netRole==='guest'){
+    if(netConnected)sendNet({type:'move',dx,dy});
+  }else if(state==='play'){
+    tryMove(0,dx,dy);
+  }
+}
+
+function stopMobileMove(){
+  if(mobileMoveTimer!==null){
+    clearInterval(mobileMoveTimer);
+    mobileMoveTimer=null;
+  }
+}
+
+// Hold a direction button to keep moving.
+document.querySelectorAll('#dpad button[data-dir]').forEach(button=>{
+  const vectors={
+    up:[0,-1],
+    down:[0,1],
+    left:[-1,0],
+    right:[1,0]
+  };
+
+  const begin=e=>{
+    e.preventDefault();
+    stopMobileMove();
+
+    const v=vectors[button.dataset.dir];
+    if(!v)return;
+
+    mobileMove(v[0],v[1]);
+    mobileMoveTimer=setInterval(()=>mobileMove(v[0],v[1]),110);
+
+    try{
+      button.setPointerCapture(e.pointerId);
+    }catch(_e){}
+  };
+
+  button.addEventListener('pointerdown',begin);
+
+  ['pointerup','pointercancel','lostpointercapture','pointerleave'].forEach(name=>{
+    button.addEventListener(name,stopMobileMove);
+  });
+});
+
+// Fire/tag button works for local play and the online guest.
+document.getElementById('mobileFire').addEventListener('pointerdown',e=>{
+  e.preventDefault();
+
+  if(netRole==='guest'){
+    if(netConnected)sendNet({type:'fire'});
+  }else{
+    fire(0);
+  }
+});
+
+addEventListener('blur',stopMobileMove);
+
+// Start the game.
 board();
-if(new URLSearchParams(location.search).has('room'))onlineMenu();
-else menu();
+
+if(new URLSearchParams(location.search).has('room')){
+  onlineMenu();
+}else{
+  menu();
+}
+
 requestAnimationFrame(loop);
 </script>
 </body>
